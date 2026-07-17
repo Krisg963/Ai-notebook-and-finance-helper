@@ -1,0 +1,8 @@
+{
+  "name": "AI Økonomibok",
+  "description": "En minimalistisk og rask AI-notatbok for å spore salg (inntekter) og utgifter, med automatisk beregning og AI-kategorisering av transaksjoner.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
