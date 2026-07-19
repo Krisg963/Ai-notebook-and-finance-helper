@@ -36,6 +36,21 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     private val _activeTab = MutableStateFlow(0) // 0: Oversikt, 1: Transaksjoner, 2: Notater
     val activeTab: StateFlow<Int> = _activeTab.asStateFlow()
 
+    private val sharedPrefs = application.getSharedPreferences("ai_okonomibok_prefs", android.content.Context.MODE_PRIVATE)
+    private val _isDarkMode = MutableStateFlow(
+        sharedPrefs.getBoolean(
+            "dark_mode",
+            (application.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        )
+    )
+    val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+    fun toggleDarkMode() {
+        val newValue = !_isDarkMode.value
+        _isDarkMode.value = newValue
+        sharedPrefs.edit().putBoolean("dark_mode", newValue).apply()
+    }
+
     init {
         val database = AppDatabase.getDatabase(application)
         repository = FinanceRepository(database.transactionDao(), database.noteDao())
@@ -63,10 +78,14 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
         netResult = transactions.map { list ->
-            val income = list.filter { it.type == "INNTEKT" }.sumOf { it.amount }
-            val expense = list.filter { it.type == "UTGIFT" }.sumOf { it.amount }
-            income - expense
+            calculateTotalBalance(list)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    }
+
+    fun calculateTotalBalance(list: List<Transaction>): Double {
+        val income = list.filter { it.type == "INNTEKT" }.sumOf { it.amount }
+        val expense = list.filter { it.type == "UTGIFT" }.sumOf { it.amount }
+        return income - expense
     }
 
     fun setActiveTab(tabIndex: Int) {

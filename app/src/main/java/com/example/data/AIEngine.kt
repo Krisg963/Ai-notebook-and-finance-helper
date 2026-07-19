@@ -78,4 +78,53 @@ Rules:
             )
         }
     }
+
+    suspend fun suggestCategory(description: String, type: String): String? = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            Log.e(TAG, "API Key is missing or default placeholder for suggestCategory!")
+            return@withContext null
+        }
+
+        val systemInstruction = """
+            You are a helpful financial assistant. Given a transaction type (INNTEKT or UTGIFT) and a description (usually in Norwegian), suggest a single concise category name (1-2 words) in Norwegian.
+            Examples:
+            - UTGIFT, "Kjøpte lunch på Rema 1000" -> "Mat"
+            - UTGIFT, "Månedlig husleie for kontoret" -> "Husleie"
+            - INNTEKT, "Lønn fra konsulentarbeid" -> "Lønn"
+            - UTGIFT, "Facebook-annonser" -> "Markedsføring"
+            - UTGIFT, "Togbillett til Oslo" -> "Reise"
+            
+            Respond with ONLY the suggested category name, with no punctuation, no quotes, and no markdown code blocks.
+        """.trimIndent()
+
+        val prompt = "Type: $type\nDescription: $description"
+
+        val request = GeminiRequest(
+            contents = listOf(
+                GeminiContent(
+                    parts = listOf(GeminiPart(text = prompt))
+                )
+            ),
+            generationConfig = GeminiGenerationConfig(
+                temperature = 0.2f
+            ),
+            systemInstruction = GeminiContent(
+                parts = listOf(GeminiPart(text = systemInstruction))
+            )
+        )
+
+        try {
+            val response = GeminiClient.service.generateContent(apiKey, request)
+            val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+            if (!text.isNullOrEmpty()) {
+                text.replace("\"", "").replace("'", "").trim()
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error suggesting category: ${e.message}", e)
+            null
+        }
+    }
 }

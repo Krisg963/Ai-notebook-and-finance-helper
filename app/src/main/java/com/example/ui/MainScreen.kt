@@ -7,6 +7,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.example.utils.SpeechRecognizerHelper
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedVisibility
@@ -70,6 +72,7 @@ fun MainScreen(
 
     val isAiLoading by viewModel.isAiLoading.collectAsStateWithLifecycle()
     val aiFeedbackMessage by viewModel.aiFeedbackMessage.collectAsStateWithLifecycle()
+    val isDarkMode by viewModel.isDarkMode.collectAsStateWithLifecycle()
 
     var showAddTxDialog by remember { mutableStateOf(false) }
     var showAddNoteDialog by remember { mutableStateOf(false) }
@@ -94,6 +97,48 @@ fun MainScreen(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp
                         )
+                    }
+                },
+                actions = {
+                    val balanceColor = if (netResult >= 0) IncomeColor else ExpenseColor
+                    val balanceBg = if (netResult >= 0) IncomeColor.copy(alpha = 0.12f) else ExpenseColor.copy(alpha = 0.12f)
+                    
+                    IconButton(
+                        onClick = { viewModel.toggleDarkMode() },
+                        modifier = Modifier.testTag("dark_mode_toggle")
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkMode) Icons.Default.WbSunny else Icons.Default.NightsStay,
+                            contentDescription = if (isDarkMode) "Bytt til lyst modus" else "Bytt til mørkt modus",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Surface(
+                        color = balanceBg,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .padding(end = 16.dp)
+                            .testTag("top_bar_total_balance")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Balanse:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = formatCurrency(netResult),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = balanceColor
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -167,7 +212,8 @@ fun MainScreen(
                     aiFeedback = aiFeedbackMessage,
                     onViewTransactionClick = { viewModel.setActiveTab(1) },
                     onViewNotesClick = { viewModel.setActiveTab(2) },
-                    onNoteClick = { selectedNoteForView = it }
+                    onNoteClick = { selectedNoteForView = it },
+                    onDeleteTransaction = { viewModel.deleteTransaction(it) }
                 )
                 1 -> TransactionsTab(
                     transactions = transactions,
@@ -234,7 +280,8 @@ fun OverviewTab(
     aiFeedback: String?,
     onViewTransactionClick: () -> Unit,
     onViewNotesClick: () -> Unit,
-    onNoteClick: (Note) -> Unit
+    onNoteClick: (Note) -> Unit,
+    onDeleteTransaction: (Int) -> Unit
 ) {
     var aiInput by remember { mutableStateOf("") }
     var showSpeechDialog by remember { mutableStateOf(false) }
@@ -598,7 +645,7 @@ fun OverviewTab(
             }
         } else {
             items(recentTransactions) { tx ->
-                TransactionRow(tx = tx, onDelete = null)
+                TransactionRow(tx = tx, onDelete = { onDeleteTransaction(tx.id) })
             }
         }
 
@@ -687,46 +734,11 @@ fun TransactionsTab(
             }
         }
 
-        if (transactions.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AccountBalanceWallet,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Text(
-                        text = "Ingen transaksjoner registrert ennå.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 15.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("transactions_list_scrollable"),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(transactions, key = { it.id }) { tx ->
-                    TransactionRow(
-                        tx = tx,
-                        onDelete = { onDelete(tx.id) }
-                    )
-                }
-            }
-        }
+        TransactionListComponent(
+            transactions = transactions,
+            onDelete = onDelete,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
@@ -811,6 +823,103 @@ fun NotesTab(
 // --- SUB-COMPONENTS & ROWS ---
 
 @Composable
+fun TransactionTypeBadge(isIncome: Boolean, modifier: Modifier = Modifier) {
+    val text = if (isIncome) "Inntekt" else "Utgift"
+    val containerColor = if (isIncome) {
+        Color(0xFFE8F5E9) // soft green
+    } else {
+        Color(0xFFFFEBEE) // soft red
+    }
+    val contentColor = if (isIncome) {
+        Color(0xFF2E7D32) // dark green
+    } else {
+        Color(0xFFC62828) // dark red
+    }
+
+    Box(
+        modifier = modifier
+            .background(color = containerColor, shape = RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .testTag(if (isIncome) "label_income" else "label_expense")
+    ) {
+        Text(
+            text = text,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = contentColor
+        )
+    }
+}
+
+@Composable
+fun TransactionCategoryBadge(category: String, modifier: Modifier = Modifier) {
+    if (category.isNotBlank()) {
+        Box(
+            modifier = modifier
+                .background(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(6.dp)
+                )
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .testTag("label_category_${category.lowercase()}")
+        ) {
+            Text(
+                text = category,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun TransactionListComponent(
+    transactions: List<Transaction>,
+    onDelete: ((Int) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    if (transactions.isEmpty()) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AccountBalanceWallet,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+                Text(
+                    text = "Ingen transaksjoner registrert ennå.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = modifier.testTag("transactions_list_component"),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(transactions, key = { it.id }) { tx ->
+                TransactionRow(
+                    tx = tx,
+                    onDelete = onDelete?.let { { it(tx.id) } }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun TransactionRow(
     tx: Transaction,
     onDelete: (() -> Unit)? = null
@@ -859,12 +968,8 @@ fun TransactionRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = tx.category,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
+                    TransactionTypeBadge(isIncome = isIncome)
+                    TransactionCategoryBadge(category = tx.category)
                     Text(
                         text = "•",
                         fontSize = 10.sp,
@@ -1080,6 +1185,31 @@ fun AddTransactionDialog(
     var category by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
 
+    val scope = rememberCoroutineScope()
+    var isSavingAndCategorizing by remember { mutableStateOf(false) }
+
+    // AI Category Suggestion states
+    var suggestedCategory by remember { mutableStateOf<String?>(null) }
+    var isSuggestingCategory by remember { mutableStateOf(false) }
+
+    LaunchedEffect(description, type) {
+        val trimmedDesc = description.trim()
+        if (trimmedDesc.length >= 3) {
+            isSuggestingCategory = true
+            delay(800) // Debounce typing
+            val suggestion = com.example.data.AIEngine.suggestCategory(trimmedDesc, type)
+            suggestedCategory = suggestion
+            isSuggestingCategory = false
+            // Auto-populate if category is currently empty
+            if (suggestion != null && category.isBlank()) {
+                category = suggestion
+            }
+        } else {
+            suggestedCategory = null
+            isSuggestingCategory = false
+        }
+    }
+
     val categories = listOf("Salg", "Varekjøp", "Tjenester", "Kontor", "Markedsføring", "Reise", "Diverse")
 
     Dialog(onDismissRequest = onDismiss) {
@@ -1163,10 +1293,83 @@ fun AddTransactionDialog(
                     label = { Text("Kategori (f.eks. Salg, Varekjøp)") },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
+                    trailingIcon = {
+                        if (isSuggestingCategory) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else if (suggestedCategory != null) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "AI foreslått kategori",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("input_category")
                 )
+
+                if (isSuggestingCategory) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 1.5.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "AI tenker på kategori...",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                } else if (suggestedCategory != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "AI-forslag:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .clickable { category = suggestedCategory!! }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("ai_category_suggestion_chip")
+                        ) {
+                            Text(
+                                text = suggestedCategory!!,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
 
                 OutlinedTextField(
                     value = description,
@@ -1196,16 +1399,47 @@ fun AddTransactionDialog(
                         onClick = {
                             val amount = amountText.toDoubleOrNull() ?: 0.0
                             if (amount > 0) {
-                                onConfirm(type, amount, category, description)
+                                val trimmedDesc = description.trim()
+                                if (trimmedDesc.isNotEmpty() && category.isBlank()) {
+                                    isSavingAndCategorizing = true
+                                    scope.launch {
+                                        try {
+                                            val suggestion = com.example.data.AIEngine.suggestCategory(trimmedDesc, type)
+                                            val finalCategory = if (!suggestion.isNullOrBlank()) suggestion else "Diverse"
+                                            onConfirm(type, amount, finalCategory, trimmedDesc)
+                                        } catch (e: Exception) {
+                                            onConfirm(type, amount, "Diverse", trimmedDesc)
+                                        } finally {
+                                            isSavingAndCategorizing = false
+                                        }
+                                    }
+                                } else {
+                                    val finalCategory = if (category.isNotBlank()) category.trim() else "Diverse"
+                                    onConfirm(type, amount, finalCategory, trimmedDesc)
+                                }
                             }
                         },
-                        enabled = amountText.toDoubleOrNull() != null && amountText.toDouble() > 0,
+                        enabled = !isSavingAndCategorizing && amountText.toDoubleOrNull() != null && amountText.toDouble() > 0,
                         modifier = Modifier
                             .weight(1f)
                             .testTag("confirm_add_transaction"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Lagre")
+                        if (isSavingAndCategorizing) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Text("Tenker...", fontSize = 14.sp)
+                            }
+                        } else {
+                            Text("Lagre")
+                        }
                     }
                 }
             }
